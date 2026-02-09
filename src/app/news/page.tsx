@@ -2,53 +2,52 @@
 
 import { useState, useEffect } from "react";
 import { AuroraBackground } from "@/components/AuroraBackground";
-import { NEWS_DATA, Article } from "@/data/news";
-import { fetchBatteryNews, GNewsArticle } from "@/lib/gnews";
+import { Article } from "@/data/news";
+import { fetchBatteryPolicyNews } from "@/lib/tavily";
 import Link from "next/link";
 import { Search, Tag, Calendar, ChevronRight, Globe, FileText, TrendingUp, Loader2 } from "lucide-react";
 
 export default function NewsPage() {
     const [filter, setFilter] = useState<'all' | 'domestic' | 'international' | 'industry'>('all');
     const [searchQuery, setSearchQuery] = useState("");
-    const [realtimeNews, setRealtimeNews] = useState<Article[]>([]);
+    const [newsData, setNewsData] = useState<Article[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    const loadNews = async () => {
+        setLoading(true);
+        setError(null);
+
+        // Set a timeout for the API call
+        const timeoutId = setTimeout(() => {
+            setError('请求超时,请刷新页面重试');
+            setLoading(false);
+        }, 30000); // 30 second timeout
+
+        try {
+            // Fetch latest battery policy news using Tavily API
+            const tavilyArticles = await fetchBatteryPolicyNews();
+            clearTimeout(timeoutId);
+
+            if (tavilyArticles.length === 0) {
+                setError('暂无新闻数据,请稍后刷新重试');
+            } else {
+                setNewsData(tavilyArticles);
+            }
+        } catch (err) {
+            clearTimeout(timeoutId);
+            console.error("Failed to load realtime news", err);
+            setError('加载新闻失败,请刷新页面重试');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
-        const loadNews = async () => {
-            setLoading(true);
-            try {
-                // Fetch latest battery news
-                const gnewsArticles = await fetchBatteryNews('动力电池 回收');
-
-                // Transform GNews format to our internal Article format
-                const transformedNews: Article[] = gnewsArticles.map((item, index) => ({
-                    id: `gnews-${index}`,
-                    title: item.title,
-                    summary: item.description,
-                    content: item.content, // GNews provides limited content in free tier, full content is in url
-                    source: item.source.name,
-                    date: new Date(item.publishedAt).toLocaleDateString(),
-                    tags: ['实时资讯', '动力电池'],
-                    category: 'industry', // Default to industry for general news
-                    imageUrl: item.image,
-                    url: item.url // Add external URL support
-                }));
-
-                setRealtimeNews(transformedNews);
-            } catch (err) {
-                console.error("Failed to load realtime news", err);
-            } finally {
-                setLoading(false);
-            }
-        };
-
         loadNews();
     }, []);
 
-    // Combine static curated data (NEWS_DATA) with real-time fetched data
-    const allNews = [...NEWS_DATA, ...realtimeNews];
-
-    const filteredNews = allNews.filter(item => {
+    const filteredNews = newsData.filter(item => {
         const matchesType = filter === 'all' || item.category === filter;
         const matchesSearch = item.title.includes(searchQuery) || item.summary.includes(searchQuery);
         return matchesType && matchesSearch;
@@ -104,18 +103,49 @@ export default function NewsPage() {
                             </div>
                         </div>
 
-                        {/* News Grid */}
-                        <div className="grid gap-6">
-                            {filteredNews.map(news => (
-                                <NewsCard key={news.id} article={news} />
-                            ))}
+                        {/* Loading State */}
+                        {loading && (
+                            <div className="flex flex-col items-center justify-center py-20">
+                                <Loader2 className="w-12 h-12 text-emerald-600 animate-spin mb-4" />
+                                <p className="text-slate-600">正在获取最新政策资讯...</p>
+                            </div>
+                        )}
 
-                            {filteredNews.length === 0 && (
-                                <div className="text-center py-20 text-slate-400">
-                                    <p>未找到相关文章</p>
+                        {/* Error State */}
+                        {!loading && error && (
+                            <div className="flex flex-col items-center justify-center py-20">
+                                <div className="bg-red-50 border border-red-200 rounded-xl p-8 max-w-md text-center">
+                                    <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                        <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                        </svg>
+                                    </div>
+                                    <h3 className="text-lg font-semibold text-red-900 mb-2">加载失败</h3>
+                                    <p className="text-red-700 mb-6">{error}</p>
+                                    <button
+                                        onClick={loadNews}
+                                        className="px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium"
+                                    >
+                                        重新加载
+                                    </button>
                                 </div>
-                            )}
-                        </div>
+                            </div>
+                        )}
+
+                        {/* News Grid */}
+                        {!loading && !error && (
+                            <div className="grid gap-6">
+                                {filteredNews.map(news => (
+                                    <NewsCard key={news.id} article={news} />
+                                ))}
+
+                                {filteredNews.length === 0 && (
+                                    <div className="text-center py-20 text-slate-400">
+                                        <p>未找到相关文章</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </main>
             </div>
@@ -157,8 +187,8 @@ function NewsCard({ article }: { article: Article & { url?: string, imageUrl?: s
                 <div className="flex-grow space-y-3">
                     <div className="flex items-center gap-3 text-xs text-slate-500 mb-1">
                         <span className={`px-2 py-0.5 rounded-full border ${article.category === 'domestic' ? 'bg-red-50 text-red-600 border-red-100' :
-                                article.category === 'international' ? 'bg-blue-50 text-blue-600 border-blue-100' :
-                                    'bg-amber-50 text-amber-600 border-amber-100'
+                            article.category === 'international' ? 'bg-blue-50 text-blue-600 border-blue-100' :
+                                'bg-amber-50 text-amber-600 border-amber-100'
                             }`}>
                             {article.category === 'domestic' ? '国内政策' : article.category === 'international' ? '国际动态' : '行业观察'}
                         </span>

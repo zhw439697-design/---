@@ -116,12 +116,50 @@ export default function UserProfilePage() {
             .catch(err => console.error(err));
     }, []);
 
-    const handleFollow = () => {
+    // Fetch follow status
+    useEffect(() => {
+        if (currentUser && currentUser.username !== username) {
+            fetch(`/api/user/follow?targetUsername=${username}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        setIsFollowing(data.isFollowing);
+                    }
+                })
+                .catch(err => console.error('Failed to fetch follow status:', err));
+        }
+    }, [currentUser, username]);
+
+    const handleFollow = async () => {
         if (!currentUser) {
             alert('请先登录');
             return;
         }
+
+        // Optimistic update
+        const previousState = isFollowing;
         setIsFollowing(!isFollowing);
+
+        try {
+            const res = await fetch('/api/user/follow', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ targetUsername: username })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                setIsFollowing(data.isFollowing);
+            } else {
+                // Revert on error
+                setIsFollowing(previousState);
+                alert('操作失败,请重试');
+            }
+        } catch (err) {
+            console.error('Failed to toggle follow:', err);
+            // Revert on error
+            setIsFollowing(previousState);
+        }
     };
 
     return (

@@ -1,0 +1,470 @@
+"use client";
+
+import { useState, useEffect, useMemo } from "react";
+import { AuroraBackground } from "@/components/AuroraBackground";
+import { HOT_TOPICS } from "@/data/posts";
+import Link from "next/link";
+import { MessageSquare, Heart, Share2, Search, Hash, PenSquare, User, X, Loader2, RefreshCw } from "lucide-react";
+
+interface Post {
+    id: string;
+    title: string;
+    content: string;
+    author: {
+        name: string;
+        role: string;
+    };
+    date: string;
+    likes: number;
+    comments: number;
+}
+
+export default function CommunityPage() {
+    const [user, setUser] = useState<{ username: string, role: string } | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [showPostModal, setShowPostModal] = useState(false);
+    const [postTitle, setPostTitle] = useState('');
+    const [postContent, setPostContent] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+
+    // Posts and interaction states
+    const [posts, setPosts] = useState<Post[]>([]);
+    const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
+    const [followedTopics, setFollowedTopics] = useState<Set<string>>(new Set());
+    const [activeFilter, setActiveFilter] = useState<'all' | 'liked' | 'topics'>('all');
+    const [postsLoading, setPostsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    // Calculate user stats
+    const userStats = useMemo(() => {
+        if (!user) return { postsCount: 0, followersCount: 0, followingCount: 0 };
+
+        const hashCode = user.username.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        return {
+            postsCount: posts.filter(p => p.author.name === user.username).length,
+            followersCount: (hashCode % 900) + 100,
+            followingCount: (hashCode % 450) + 50,
+        };
+    }, [user, posts]);
+
+    // Fetch posts
+    const fetchPosts = async () => {
+        setPostsLoading(true);
+        setError(null);
+        try {
+            const filterParam = activeFilter === 'all' ? 'all' : activeFilter;
+            const usernameParam = user ? `&username=${user.username}` : '';
+            const res = await fetch(`/api/community/posts?filter=${filterParam}${usernameParam}`);
+
+            if (!res.ok) throw new Error('Failed to fetch posts');
+
+            const data = await res.json();
+            setPosts(data.posts || []);
+        } catch (err) {
+            console.error('Failed to load posts:', err);
+            setError('加载帖子失败,请刷新重试');
+        } finally {
+            setPostsLoading(false);
+        }
+    };
+
+    // Fetch followed topics
+    const fetchFollowedTopics = async () => {
+        if (!user) return;
+        try {
+            const res = await fetch('/api/community/topics/followed');
+            if (res.ok) {
+                const data = await res.json();
+                setFollowedTopics(new Set(data.topics || []));
+            }
+        } catch (err) {
+            console.error('Failed to load followed topics:', err);
+        }
+    };
+
+    useEffect(() => {
+        fetch('/api/auth/me')
+            .then(res => res.json())
+            .then(data => {
+                if (data.user) {
+                    setUser(data.user);
+                }
+            })
+            .catch(err => console.error(err))
+            .finally(() => setLoading(false));
+    }, []);
+
+    useEffect(() => {
+        if (!loading) {
+            fetchPosts();
+            fetchFollowedTopics();
+        }
+    }, [activeFilter, loading]);
+
+    return (
+        <AuroraBackground theme="light">
+            <div className="w-full min-h-screen relative z-10 flex flex-col">
+                {/* Header */}
+                <header className="fixed top-0 w-full z-50 bg-white/60 backdrop-blur-md border-b border-purple-100">
+                    <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+                        <div className="flex items-center gap-2 font-bold text-xl text-slate-900">
+                            <Link href="/" className="hover:opacity-80 transition-opacity">智链绿能</Link>
+                            <span className="text-slate-300">/</span>
+                            <span className="text-purple-600">智链社区</span>
+                        </div>
+                        <div className="hidden md:flex flex-1 max-w-md mx-8">
+                            <div className="relative w-full">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                <input
+                                    type="text"
+                                    placeholder="搜索话题、帖子..."
+                                    className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-purple-500/50 text-sm"
+                                />
+                            </div>
+                        </div>
+                        <nav className="hidden md:flex gap-6 text-sm font-medium text-slate-600">
+                            <Link href="/" className="hover:text-purple-600">首页</Link>
+                            <Link href="/news" className="hover:text-purple-600">政策资讯</Link>
+                            <Link href="/dashboard" className="hover:text-purple-600">数据中台</Link>
+                        </nav>
+                        <button className="md:hidden p-2 text-slate-600">
+                            <User size={24} />
+                        </button>
+                    </div>
+                </header>
+
+                <main className="flex-grow pt-24 pb-12 px-4">
+                    <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-8">
+                        {/* Left Sidebar - Navigation (User Profile) */}
+                        <div className="hidden lg:block lg:col-span-1 space-y-6">
+                            <div className="bg-white/70 backdrop-blur-md rounded-2xl p-6 border border-slate-100 shadow-sm">
+                                <div className="flex items-center gap-4 mb-6">
+                                    <Link href={user ? `/community/user/${user.username}` : '/login'}>
+                                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center text-purple-600 font-bold text-xl cursor-pointer hover:scale-105 transition-transform">
+                                            {user ? user.username[0].toUpperCase() : <User size={24} />}
+                                        </div>
+                                    </Link>
+                                    <div className="flex-grow">
+                                        <Link href={user ? `/community/user/${user.username}` : '/login'}>
+                                            <div className="font-bold text-slate-900 hover:text-purple-600 transition-colors cursor-pointer">{user ? user.username : '未登录用户'}</div>
+                                        </Link>
+                                        <div className="text-xs text-slate-500">
+                                            {user ? (user.role === 'admin' ? '管理员' : '社区成员') : '登录参与讨论'}
+                                        </div>
+                                    </div>
+                                </div>
+                                {user ? (
+                                    <>
+                                        <div className="grid grid-cols-3 gap-2 text-center mb-4">
+                                            <Link href={`/community/user/${user.username}`}>
+                                                <div className="bg-slate-50 rounded-lg p-2 hover:bg-slate-100 transition-colors cursor-pointer">
+                                                    <div className="font-bold text-slate-900">{userStats.postsCount}</div>
+                                                    <div className="text-xs text-slate-400">帖子</div>
+                                                </div>
+                                            </Link>
+                                            <Link href={`/community/user/${user.username}`}>
+                                                <div className="bg-slate-50 rounded-lg p-2 hover:bg-slate-100 transition-colors cursor-pointer">
+                                                    <div className="font-bold text-slate-900">{userStats.followingCount}</div>
+                                                    <div className="text-xs text-slate-400">关注</div>
+                                                </div>
+                                            </Link>
+                                            <Link href={`/community/user/${user.username}`}>
+                                                <div className="bg-slate-50 rounded-lg p-2 hover:bg-slate-100 transition-colors cursor-pointer">
+                                                    <div className="font-bold text-slate-900">{userStats.followersCount}</div>
+                                                    <div className="text-xs text-slate-400">粉丝</div>
+                                                </div>
+                                            </Link>
+                                        </div>
+                                        <Link href={`/community/user/${user.username}`} className="block w-full py-2 bg-purple-600 text-white text-center rounded-xl font-medium hover:bg-purple-700 transition-colors">
+                                            查看个人主页
+                                        </Link>
+                                    </>
+                                ) : (
+                                    <Link href="/login" className="block w-full py-2 bg-purple-600 text-white text-center rounded-xl font-medium hover:bg-purple-700 transition-colors">
+                                        立即登录
+                                    </Link>
+                                )}
+                            </div>
+
+                            <div className="bg-white/70 backdrop-blur-md rounded-2xl p-4 border border-slate-100 shadow-sm space-y-1">
+                                <NavItem
+                                    active={activeFilter === 'all'}
+                                    icon={<MessageSquare size={18} />}
+                                    label="全部讨论"
+                                    onClick={() => setActiveFilter('all')}
+                                />
+                                <NavItem
+                                    active={activeFilter === 'liked'}
+                                    icon={<Heart size={18} />}
+                                    label="我的点赞"
+                                    onClick={() => setActiveFilter('liked')}
+                                />
+                                <NavItem
+                                    active={activeFilter === 'topics'}
+                                    icon={<Hash size={18} />}
+                                    label="关注的话题"
+                                    onClick={() => setActiveFilter('topics')}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Middle - Feed */}
+                        <div className="lg:col-span-2 space-y-6">
+                            {/* Create Post Input */}
+                            <div
+                                onClick={() => user && setShowPostModal(true)}
+                                className="bg-white/80 backdrop-blur-md rounded-2xl p-4 border border-slate-100 shadow-sm flex gap-4 items-center cursor-pointer hover:bg-white transition-colors"
+                            >
+                                <div className="w-10 h-10 rounded-full bg-slate-100 flex-shrink-0 flex items-center justify-center text-slate-400">
+                                    {user ? <span className="font-bold text-purple-600">{user.username[0].toUpperCase()}</span> : <User size={20} />}
+                                </div>
+                                <div className="flex-grow bg-slate-50 rounded-full px-4 py-2.5 text-slate-400 text-sm">
+                                    {user ? `分享你的观点或提问，${user.username}...` : "登录后参与讨论..."}
+                                </div>
+                                <button className="p-2 text-purple-600 hover:bg-purple-50 rounded-full">
+                                    <PenSquare size={20} />
+                                </button>
+                            </div>
+
+                            {/* Posts List */}
+                            {(() => {
+                                let filteredPosts = POSTS_DATA;
+
+                                if (activeFilter === 'liked') {
+                                    // Show only liked posts
+                                    filteredPosts = POSTS_DATA.filter(post => likedPosts.has(post.id));
+                                } else if (activeFilter === 'topics') {
+                                    // Show posts from followed topics
+                                    // Since we don't have topic tags in posts yet, show empty state
+                                    filteredPosts = [];
+                                }
+
+                                return filteredPosts.length > 0 ? (
+                                    filteredPosts.map(post => (
+                                        <div key={post.id} className="bg-white/70 backdrop-blur-md rounded-2xl p-6 border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+                                            <div className="flex items-start justify-between mb-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center text-purple-600 font-bold text-sm">
+                                                        {post.author.name[0]}
+                                                    </div>
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <Link href={`/community/user/${post.author.name}`} className="font-bold text-slate-900 text-sm hover:text-purple-600 transition-colors">
+                                                                {post.author.name}
+                                                            </Link>
+                                                            {post.author.role === 'expert' && <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-medium">认证专家</span>}
+                                                            {post.author.role === 'company' && <span className="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0.5 rounded font-medium">企业号</span>}
+                                                        </div>
+                                                        <div className="text-xs text-slate-500">{post.date}</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <Link href={`/community/${post.id}`}>
+                                                <h3 className="font-bold text-lg text-slate-900 mb-2 cursor-pointer hover:text-purple-700 transition-colors">
+                                                    {post.title}
+                                                </h3>
+                                            </Link>
+                                            <p className="text-slate-600 text-sm leading-relaxed mb-4 line-clamp-3">
+                                                {post.content}
+                                            </p>
+
+                                            <div className="flex items-center gap-4 text-slate-500 text-sm">
+                                                <button className="flex items-center gap-1.5 hover:text-purple-600 transition-colors">
+                                                    <MessageSquare size={16} /> {post.comments}
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        if (!user) {
+                                                            alert('请先登录');
+                                                            return;
+                                                        }
+                                                        const isLiked = likedPosts.has(post.id);
+                                                        const newLikedPosts = new Set(likedPosts);
+                                                        if (isLiked) {
+                                                            newLikedPosts.delete(post.id);
+                                                            setPostLikeCounts(prev => ({ ...prev, [post.id]: (prev[post.id] || post.likes) - 1 }));
+                                                        } else {
+                                                            newLikedPosts.add(post.id);
+                                                            setPostLikeCounts(prev => ({ ...prev, [post.id]: (prev[post.id] || post.likes) + 1 }));
+                                                        }
+                                                        setLikedPosts(newLikedPosts);
+                                                    }}
+                                                    className={`flex items-center gap-1.5 transition-colors ${likedPosts.has(post.id) ? 'text-red-500' : 'hover:text-red-500'
+                                                        }`}
+                                                >
+                                                    <Heart size={16} fill={likedPosts.has(post.id) ? 'currentColor' : 'none'} />
+                                                    {postLikeCounts[post.id] || post.likes}
+                                                </button>
+                                                <button className="flex items-center gap-1.5 hover:text-blue-500 transition-colors ml-auto">
+                                                    <Share2 size={16} /> 分享
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="bg-white/70 backdrop-blur-md rounded-2xl p-12 border border-slate-100 shadow-sm text-center">
+                                        <p className="text-slate-400">
+                                            {activeFilter === 'liked' ? '暂无点赞的帖子' : '暂无关注话题的帖子'}
+                                        </p>
+                                    </div>
+                                );
+                            })()}
+                        </div>
+
+                        {/* Right Sidebar - Hot Topics */}
+                        <div className="hidden lg:block lg:col-span-1 space-y-6">
+                            <div className="bg-white/70 backdrop-blur-md rounded-2xl p-6 border border-slate-100 shadow-sm sticky top-24">
+                                <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
+                                    <TrendingUpIcon /> 热门话题
+                                </h3>
+                                <div className="space-y-4">
+                                    {HOT_TOPICS.map((topic, index) => (
+                                        <div key={topic.name} className="flex items-center justify-between group cursor-pointer">
+                                            <div className="flex items-center gap-3 flex-grow">
+                                                <span className={`w-5 h-5 flex items-center justify-center text-xs font-bold rounded ${index < 3 ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-500'
+                                                    }`}>
+                                                    {index + 1}
+                                                </span>
+                                                <span className="text-sm text-slate-700 group-hover:text-purple-600 transition-colors">#{topic.name}</span>
+                                                <span className="text-xs text-slate-400">{topic.count}</span>
+                                            </div>
+                                            <button
+                                                onClick={() => {
+                                                    if (!user) {
+                                                        alert('请先登录');
+                                                        return;
+                                                    }
+                                                    const newFollowedTopics = new Set(followedTopics);
+                                                    if (newFollowedTopics.has(topic.name)) {
+                                                        newFollowedTopics.delete(topic.name);
+                                                    } else {
+                                                        newFollowedTopics.add(topic.name);
+                                                    }
+                                                    setFollowedTopics(newFollowedTopics);
+                                                }}
+                                                className={`text-xs px-2 py-1 rounded-full transition-colors flex-shrink-0 ${followedTopics.has(topic.name)
+                                                    ? 'bg-purple-100 text-purple-700'
+                                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                                    }`}
+                                            >
+                                                {followedTopics.has(topic.name) ? '已关注' : '关注'}
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+
+                {/* Post Creation Modal */}
+                {
+                    showPostModal && (
+                        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowPostModal(false)}>
+                            <div className="bg-white rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center justify-between mb-6">
+                                    <h3 className="text-xl font-bold text-slate-900">发布新帖子</h3>
+                                    <button onClick={() => setShowPostModal(false)} className="text-slate-400 hover:text-slate-600">
+                                        <X size={24} />
+                                    </button>
+                                </div>
+
+                                <div className="space-y-4">
+                                    {/* Title Input */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-2">标题</label>
+                                        <input
+                                            type="text"
+                                            value={postTitle}
+                                            onChange={(e) => setPostTitle(e.target.value)}
+                                            placeholder="输入帖子标题..."
+                                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50 text-slate-900"
+                                            maxLength={100}
+                                        />
+                                        <p className="text-xs text-slate-500 mt-1">{postTitle.length}/100</p>
+                                    </div>
+
+                                    {/* Content Input */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-2">内容</label>
+                                        <textarea
+                                            value={postContent}
+                                            onChange={(e) => setPostContent(e.target.value)}
+                                            placeholder="分享你的观点、经验或提出问题..."
+                                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50 text-slate-900 resize-none"
+                                            rows={8}
+                                            maxLength={1000}
+                                        />
+                                        <p className="text-xs text-slate-500 mt-1">{postContent.length}/1000</p>
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div className="flex gap-3 pt-4">
+                                        <button
+                                            onClick={() => {
+                                                setShowPostModal(false);
+                                                setPostTitle('');
+                                                setPostContent('');
+                                            }}
+                                            className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors font-medium"
+                                        >
+                                            取消
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                if (!postTitle.trim() || !postContent.trim()) {
+                                                    alert('请填写标题和内容');
+                                                    return;
+                                                }
+                                                setSubmitting(true);
+                                                try {
+                                                    // TODO: Add API call to save post
+                                                    console.log('发布帖子:', { title: postTitle, content: postContent });
+                                                    alert('帖子发布成功!');
+                                                    setShowPostModal(false);
+                                                    setPostTitle('');
+                                                    setPostContent('');
+                                                } catch (err) {
+                                                    console.error(err);
+                                                    alert('发布失败,请重试');
+                                                } finally {
+                                                    setSubmitting(false);
+                                                }
+                                            }}
+                                            disabled={submitting || !postTitle.trim() || !postContent.trim()}
+                                            className="flex-1 px-4 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {submitting ? '发布中...' : '发布'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )
+                }
+            </div >
+        </AuroraBackground >
+    );
+}
+
+function NavItem({ icon, label, active = false, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void }) {
+    return (
+        <button
+            onClick={onClick}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${active ? 'bg-purple-50 text-purple-700' : 'text-slate-600 hover:bg-slate-50'
+                }`}>
+            {icon}
+            {label}
+        </button>
+    )
+}
+
+function TrendingUpIcon() {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-purple-500">
+            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+            <polyline points="17 6 23 6 23 12"></polyline>
+        </svg>
+    )
+}
