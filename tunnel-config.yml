@@ -1,0 +1,7 @@
+tunnel: 2bf3661d-f87e-40a8-b50d-c3f3e378a8a2
+credentials-file: C:\Users\王子豪\.cloudflared\2bf3661d-f87e-40a8-b50d-c3f3e378a8a2.json
+
+ingress:
+  - hostname: 182307.xyz
+    service: http://localhost:3000
+  - service: http_status:404
