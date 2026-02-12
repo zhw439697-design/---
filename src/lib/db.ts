@@ -85,6 +85,23 @@ export function initDB() {
     )
   `);
 
+    db.exec(`
+    CREATE TABLE IF NOT EXISTS expert_applications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL,
+      name TEXT NOT NULL,
+      field TEXT NOT NULL,
+      contact TEXT NOT NULL,
+      contact TEXT NOT NULL,
+      reason TEXT,
+      type TEXT NOT NULL DEFAULT 'individual', -- individual, enterprise, organization
+      status TEXT DEFAULT 'pending', -- pending, reviewing, approved, rejected
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (username) REFERENCES users(username)
+    )
+  `);
+
     // Migration: Add new columns if they don't exist
     const migrations = [
         'ALTER TABLE users ADD COLUMN avatar_url TEXT',
@@ -95,7 +112,9 @@ export function initDB() {
         'ALTER TABLE users ADD COLUMN location TEXT',
         'ALTER TABLE users ADD COLUMN nickname TEXT',
         'ALTER TABLE users ADD COLUMN verification_status TEXT DEFAULT "none"',
-        'ALTER TABLE users ADD COLUMN verification_type TEXT'
+        'ALTER TABLE users ADD COLUMN verification_status TEXT DEFAULT "none"',
+        'ALTER TABLE users ADD COLUMN verification_type TEXT',
+        'ALTER TABLE expert_applications ADD COLUMN type TEXT DEFAULT "individual"'
     ];
 
     migrations.forEach(migration => {
@@ -170,13 +189,110 @@ export function updateUser(username: string, updates: any) {
     return getUser(username);
 }
 
+export function getAllUsers() {
+    // Return all users without sensitive info
+    return db.prepare(`
+        SELECT id, username, role, avatar_url, bio, birthday, email, phone, location, nickname, verification_status, verification_type, created_at 
+        FROM users 
+        ORDER BY created_at DESC
+    `).all();
+}
+
+export function deleteUser(username: string) {
+    const deleteTransaction = db.transaction(() => {
+        // Delete related data manually just to be safe (though some have ON DELETE CASCADE)
+        db.prepare('DELETE FROM expert_applications WHERE username = ?').run(username);
+        db.prepare('DELETE FROM topic_follows WHERE user_username = ?').run(username);
+        db.prepare('DELETE FROM user_follows WHERE follower_username = ? OR following_username = ?').run(username, username);
+        db.prepare('DELETE FROM likes WHERE user_username = ?').run(username);
+
+        // Comments and Posts usually cascade but let's be sure or rely on foreign keys if set
+        db.prepare('DELETE FROM comments WHERE author_username = ?').run(username);
+        db.prepare('DELETE FROM posts WHERE author_username = ?').run(username);
+
+        // Finally delete user
+        const result = db.prepare('DELETE FROM users WHERE username = ?').run(username);
+        return result.changes > 0;
+    });
+
+    return deleteTransaction();
+}
+
+// ==================== Expert Application Helper Functions ====================
+
+export function createExpertApplication(data: { username: string, name: string, field: string, contact: string, reason: string, type: string }) {
+    // Auto-cleanup: Remove any existing PENDING applications for this user
+    // This ensures "last one prevails" logic for pending requests
+    db.prepare("DELETE FROM expert_applications WHERE username = ? AND status = 'pending'").run(data.username);
+
+    const stmt = db.prepare(`
+        INSERT INTO expert_applications (username, name, field, contact, reason, type)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const info = stmt.run(data.username, data.name, data.field, data.contact, data.reason, data.type);
+    return { id: info.lastInsertRowid, ...data, status: 'pending' };
+}
+
+export function deleteExpertApplication(id: number) {
+    const res = db.prepare('DELETE FROM expert_applications WHERE id = ?').run(id);
+    return res.changes > 0;
+}
+
+export function getExpertApplication(username: string) {
+    // Get the latest application for the user
+    const stmt = db.prepare('SELECT * FROM expert_applications WHERE username = ? ORDER BY id DESC LIMIT 1');
+    return stmt.get(username);
+}
+
+export function getAllExpertApplications(status?: string) {
+    let query = 'SELECT * FROM expert_applications';
+    const params: any[] = [];
+
+    if (status) {
+        query += ' WHERE status = ?';
+        params.push(status);
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const stmt = db.prepare(query);
+    return stmt.all(...params);
+}
+
+export function updateExpertApplicationStatus(id: number, status: string) {
+    const stmt = db.prepare('UPDATE expert_applications SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+    stmt.run(status, id);
+
+    // If approved, update user role to expert (or add verification status)
+    if (status === 'approved') {
+        const app: any = db.prepare('SELECT username, type FROM expert_applications WHERE id = ?').get(id);
+        if (app) {
+            const updateStmt = db.prepare('UPDATE users SET role = \'expert\', verification_type = ? WHERE username = ?');
+            updateStmt.run(app.type, app.username);
+        }
+    }
+
+    return db.prepare('SELECT * FROM expert_applications WHERE id = ?').get(id);
+}
+
+
 // ==================== Community Helper Functions ====================
 
-// Posts
+// Posts (Rebuild Trigger)
 export function createPost(title: string, content: string, authorUsername: string) {
     const stmt = db.prepare('INSERT INTO posts (title, content, author_username) VALUES (?, ?, ?)');
     const info = stmt.run(title, content, authorUsername);
     return { id: info.lastInsertRowid, title, content, author_username: authorUsername };
+}
+
+export function deletePost(id: number) {
+    const deleteTransaction = db.transaction(() => {
+        db.prepare('DELETE FROM likes WHERE post_id = ?').run(id);
+        db.prepare('DELETE FROM comments WHERE post_id = ?').run(id);
+        const result = db.prepare('DELETE FROM posts WHERE id = ?').run(id);
+        return result.changes > 0;
+    });
+    return deleteTransaction();
 }
 
 export function getPosts(filter?: { username?: string; likedBy?: string; followedTopics?: string[] }) {
@@ -217,18 +333,7 @@ export function getPostById(id: number) {
     return stmt.get(id);
 }
 
-export function deletePost(id: number, username: string, isAdmin: boolean = false) {
-    const post: any = getPostById(id);
-    if (!post) return false;
 
-    if (post.author_username !== username && !isAdmin) {
-        throw new Error('Unauthorized');
-    }
-
-    const stmt = db.prepare('DELETE FROM posts WHERE id = ?');
-    stmt.run(id);
-    return true;
-}
 
 // Comments
 export function createComment(postId: number, content: string, authorUsername: string) {

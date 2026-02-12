@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { AuroraBackground } from "@/components/AuroraBackground";
 import Link from "next/link";
-import { MessageSquare, Heart, Share2, Search, Hash, PenSquare, User, X, Loader2, RefreshCw, Mail, Send, MoreHorizontal, Phone, Video } from "lucide-react";
+import { MessageSquare, Heart, Share2, Search, Hash, PenSquare, User, X, Loader2, RefreshCw, Mail, Send, MoreHorizontal, Phone, Video, Check } from "lucide-react";
 
 // Mock data for messages
 const MOCK_MESSAGES = [
@@ -92,6 +92,12 @@ export default function CommunityPage() {
     // User stats state
     const [userStats, setUserStats] = useState({ postsCount: 0, followersCount: 0, followingCount: 0 });
 
+    // Expert Application State
+    const [expertStatus, setExpertStatus] = useState<'none' | 'pending' | 'reviewing' | 'approved' | 'rejected'>('none');
+    const [showExpertModal, setShowExpertModal] = useState(false);
+    const [expertForm, setExpertForm] = useState({ name: '', field: '', contact: '', reason: '', type: '' });
+    const [expertSubmitting, setExpertSubmitting] = useState(false);
+
     // Fetch posts
     const fetchPosts = async () => {
         setPostsLoading(true);
@@ -126,6 +132,61 @@ export default function CommunityPage() {
             }
         } catch (err) {
             console.error('Failed to load user stats:', err);
+        }
+    };
+
+    // Fetch expert application status
+    const fetchExpertStatus = async () => {
+        if (!user) return;
+        try {
+            const res = await fetch('/api/expert/status');
+            if (res.ok) {
+                const data = await res.json();
+                if (data.application) {
+                    setExpertStatus(data.application.status);
+                    // Pre-fill form if rejected/pending
+                    setExpertForm({
+                        name: data.application.name,
+                        field: data.application.field,
+                        contact: data.application.contact,
+                        reason: data.application.reason,
+                        type: data.application.type || ''
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Failed to load expert status:', err);
+        }
+    };
+
+    const handleApplyExpert = async () => {
+        if (!expertForm.name || !expertForm.field || !expertForm.contact || !expertForm.reason || !expertForm.type) {
+            alert('请填写所有必填字段');
+            return;
+        }
+
+        setExpertSubmitting(true);
+        try {
+            const res = await fetch('/api/expert/apply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(expertForm)
+            });
+
+            const data = await res.json();
+
+            if (res.ok) {
+                setExpertStatus('pending');
+                setShowExpertModal(false);
+                alert('申请提交成功，请等待审核');
+            } else {
+                alert(data.error || '申请提交失败');
+            }
+        } catch (err) {
+            console.error('Failed to apply:', err);
+            alert('申请提交失败，请重试');
+        } finally {
+            setExpertSubmitting(false);
         }
     };
 
@@ -214,6 +275,7 @@ export default function CommunityPage() {
         if (!loading) {
             fetchPosts();
             fetchUserStats();
+            fetchExpertStatus();
         }
     }, [activeFilter, loading]);
 
@@ -742,9 +804,54 @@ export default function CommunityPage() {
                                 <div className="relative z-10">
                                     <h3 className="font-bold text-lg mb-2">加入专家计划</h3>
                                     <p className="text-purple-100 text-sm mb-4">认证成为领域专家，获取更多曝光和权益</p>
-                                    <button className="px-4 py-2 bg-white text-purple-600 rounded-lg text-sm font-bold hover:bg-purple-50 transition-colors">
-                                        立即申请
-                                    </button>
+
+                                    {expertStatus === 'none' && (
+                                        <button
+                                            onClick={() => user ? setShowExpertModal(true) : alert('请先登录')}
+                                            className="px-4 py-2 bg-white text-purple-600 rounded-lg text-sm font-bold hover:bg-purple-50 transition-colors"
+                                        >
+                                            立即申请
+                                        </button>
+                                    )}
+                                    {expertStatus === 'pending' && (
+                                        <div className="flex flex-col items-start gap-2">
+                                            <span className="px-4 py-2 bg-yellow-400 text-yellow-900 rounded-lg text-sm font-bold inline-flex items-center gap-2">
+                                                <Loader2 size={16} className="animate-spin" />
+                                                审核中
+                                            </span>
+                                            <button
+                                                onClick={() => setShowExpertModal(true)}
+                                                className="text-xs text-white/80 hover:text-white underline pl-1"
+                                            >
+                                                修改申请资料
+                                            </button>
+                                        </div>
+                                    )}
+                                    {expertStatus === 'reviewing' && (
+                                        <span className="px-4 py-2 bg-blue-400 text-blue-900 rounded-lg text-sm font-bold inline-block">
+                                            认证审核中
+                                        </span>
+                                    )}
+                                    {expertStatus === 'approved' && (
+                                        <span className="px-4 py-2 bg-green-400 text-green-900 rounded-lg text-sm font-bold inline-flex items-center gap-2">
+                                            <Check size={16} />
+                                            认证成功
+                                        </span>
+                                    )}
+                                    {expertStatus === 'rejected' && (
+                                        <div className="flex flex-col items-start gap-2">
+                                            <span className="px-4 py-2 bg-red-400 text-red-900 rounded-lg text-sm font-bold inline-flex items-center gap-2">
+                                                <X size={16} />
+                                                认证失败
+                                            </span>
+                                            <button
+                                                onClick={() => setShowExpertModal(true)}
+                                                className="text-xs text-white/80 hover:text-white underline"
+                                            >
+                                                重新申请
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -794,57 +901,141 @@ export default function CommunityPage() {
                                 {/* Action Buttons */}
                                 <div className="flex gap-3 pt-4">
                                     <button
-                                        onClick={() => {
-                                            setShowPostModal(false);
-                                            setPostTitle('');
-                                            setPostContent('');
-                                        }}
-                                        className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors font-medium"
-                                    >
-                                        取消
-                                    </button>
-                                    <button
                                         onClick={async () => {
-                                            if (!postTitle.trim() || !postContent.trim()) {
-                                                alert('请填写标题和内容');
-                                                return;
-                                            }
+                                            if (!postTitle.trim() || !postContent.trim()) return;
+
                                             setSubmitting(true);
                                             try {
-                                                const res = await fetch('/api/community/posts', {
+                                                const res = await fetch('/api/community/posts/create', {
                                                     method: 'POST',
                                                     headers: { 'Content-Type': 'application/json' },
                                                     body: JSON.stringify({ title: postTitle, content: postContent })
                                                 });
 
-                                                if (!res.ok) {
-                                                    throw new Error('Failed to create post');
+                                                if (res.ok) {
+                                                    setShowPostModal(false);
+                                                    setPostTitle('');
+                                                    setPostContent('');
+                                                    // Refresh posts
+                                                    fetchPosts();
+                                                    // Update stats
+                                                    fetchUserStats();
+                                                } else {
+                                                    alert('发布失败,请重试');
                                                 }
-
-                                                alert('帖子发布成功!');
-                                                setShowPostModal(false);
-                                                setPostTitle('');
-                                                setPostContent('');
-                                                await fetchPosts(); // Refresh posts list
                                             } catch (err) {
-                                                console.error(err);
+                                                console.error('Failed to create post:', err);
                                                 alert('发布失败,请重试');
                                             } finally {
                                                 setSubmitting(false);
                                             }
                                         }}
                                         disabled={submitting || !postTitle.trim() || !postContent.trim()}
-                                        className="flex-1 px-4 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="px-6 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2 ml-auto"
                                     >
-                                        {submitting ? '发布中...' : '发布'}
+                                        {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                                        发布
                                     </button>
                                 </div>
                             </div>
                         </div>
                     </div>
                 )}
-            </div>
-        </AuroraBackground>
+
+                {/* Expert Application Modal */}
+                {showExpertModal && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowExpertModal(false)}>
+                        <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-between mb-6">
+                                <h3 className="text-xl font-bold text-slate-900">申请成为认证专家</h3>
+                                <button onClick={() => setShowExpertModal(false)} className="text-slate-400 hover:text-slate-600">
+                                    <X size={24} />
+                                </button>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">真实姓名</label>
+                                    <input
+                                        type="text"
+                                        value={expertForm.name}
+                                        onChange={(e) => setExpertForm({ ...expertForm, name: e.target.value })}
+                                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                                        placeholder="请输入您的真实姓名"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">认证类型</label>
+                                    <select
+                                        value={expertForm.type}
+                                        onChange={(e) => setExpertForm({ ...expertForm, type: e.target.value })}
+                                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                                    >
+                                        <option value="">请选择类型...</option>
+                                        <option value="individual">个人专家</option>
+                                        <option value="enterprise">企业认证</option>
+                                        <option value="organization">机构认证</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">专业领域</label>
+                                    <select
+                                        value={expertForm.field}
+                                        onChange={(e) => setExpertForm({ ...expertForm, field: e.target.value })}
+                                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                                    >
+                                        <option value="">请选择领域...</option>
+                                        <option value="电池材料">电池材料</option>
+                                        <option value="回收工艺">回收工艺</option>
+                                        <option value="环保政策">环保政策</option>
+                                        <option value="新能源应用">新能源应用</option>
+                                        <option value="其他">其他</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">联系方式</label>
+                                    <input
+                                        type="text"
+                                        value={expertForm.contact}
+                                        onChange={(e) => setExpertForm({ ...expertForm, contact: e.target.value })}
+                                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                                        placeholder="手机号或邮箱"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">申请理由 / 资质说明</label>
+                                    <textarea
+                                        value={expertForm.reason}
+                                        onChange={(e) => setExpertForm({ ...expertForm, reason: e.target.value })}
+                                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none h-32"
+                                        placeholder="请简要介绍您的专业背景和申请理由..."
+                                    />
+                                </div>
+
+                                <div className="pt-4 flex justify-end gap-3">
+                                    <button
+                                        onClick={() => setShowExpertModal(false)}
+                                        className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+                                    >
+                                        取消
+                                    </button>
+                                    <button
+                                        onClick={handleApplyExpert}
+                                        disabled={expertSubmitting}
+                                        className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 font-medium flex items-center gap-2"
+                                    >
+                                        {expertSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                                        提交申请
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+
+            </div >
+        </AuroraBackground >
     );
 }
 function NavItem({ icon, label, active = false, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void }) {

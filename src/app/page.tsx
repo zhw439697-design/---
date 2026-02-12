@@ -3,7 +3,12 @@ import { ArrowRight, BarChart3, Bot, CheckCircle2, Zap, Search, Leaf } from "luc
 import Logo from "../components/Logo";
 import { AuroraBackground } from "@/components/AuroraBackground";
 
-export default function Home() {
+import { cookies } from 'next/headers';
+
+export default async function Home() {
+  const cookieStore = await cookies();
+  const isAdmin = cookieStore.get('auth_token')?.value === 'admin';
+
   return (
     <AuroraBackground theme="light">
       <div className="relative w-full flex flex-col min-h-screen">
@@ -17,6 +22,9 @@ export default function Home() {
             <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
               <Link href="/news" className="hover:text-emerald-600 transition-colors">政策资讯</Link>
               <Link href="/community" className="hover:text-emerald-600 transition-colors">智链社区</Link>
+              {isAdmin && (
+                <Link href="/admin" className="text-purple-600 hover:text-purple-700 font-bold transition-colors">管理后台</Link>
+              )}
               <Link href="#features" className="hover:text-emerald-600 transition-colors">功能特性</Link>
               <Link href="/dashboard" className="hover:text-emerald-600 transition-colors">数据中台</Link>
               <Link href="/ai-assistant" className="hover:text-emerald-600 transition-colors">智能专家</Link>
