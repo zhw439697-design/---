@@ -10,7 +10,8 @@ import {
     Settings,
     LogOut,
     Menu,
-    X
+    X,
+    Home
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -174,7 +175,19 @@ export default function AdminLayout({
                     </nav>
 
                     {/* User Profile & Logout */}
-                    <div className="border-t border-slate-700 p-4">
+                    <div className="border-t border-slate-700 p-4 space-y-2">
+                        <Link
+                            href="/"
+                            className={`
+                                w-full flex items-center px-3 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white transition-colors
+                                ${isSidebarOpen ? 'justify-start' : 'justify-center'}
+                            `}
+                        >
+                            <Home size={20} />
+                            {isSidebarOpen && (
+                                <span className="ml-3 text-sm font-medium">返回首页</span>
+                            )}
+                        </Link>
                         <button
                             onClick={handleLogout}
                             className={`

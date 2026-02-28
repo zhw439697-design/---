@@ -2,12 +2,14 @@ import Link from "next/link";
 import { ArrowRight, BarChart3, Bot, CheckCircle2, Zap, Search, Leaf } from "lucide-react";
 import Logo from "../components/Logo";
 import { AuroraBackground } from "@/components/AuroraBackground";
+import { LogoutButton } from "@/components/LogoutButton";
 
 import { cookies } from 'next/headers';
 
 export default async function Home() {
   const cookieStore = await cookies();
   const isAdmin = cookieStore.get('auth_token')?.value === 'admin';
+  const isLoggedIn = !!cookieStore.get('auth_token')?.value;
 
   return (
     <AuroraBackground theme="light">
@@ -25,9 +27,12 @@ export default async function Home() {
               {isAdmin && (
                 <Link href="/admin" className="text-purple-600 hover:text-purple-700 font-bold transition-colors">管理后台</Link>
               )}
-              <Link href="#features" className="hover:text-emerald-600 transition-colors">功能特性</Link>
-              <Link href="/dashboard" className="hover:text-emerald-600 transition-colors">数据中台</Link>
-              <Link href="/ai-assistant" className="hover:text-emerald-600 transition-colors">智能专家</Link>
+              <Link href="/dashboard" className="hover:text-emerald-600 transition-colors">数据中心</Link>
+              {isLoggedIn && (
+                <div className="border-l border-slate-200 pl-4 ml-2">
+                  <LogoutButton />
+                </div>
+              )}
             </div>
             <div className="md:hidden">
               {/* Mobile menu placeholder */}

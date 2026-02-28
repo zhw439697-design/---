@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 
-const dbPath = path.join(process.cwd(), 'ecocycle.db');
+const dbPath = path.join(process.cwd(), 'ecocycle.db'); //数据库路径
 const db = new Database(dbPath);
 
 // Initialize Database
@@ -21,9 +21,30 @@ export function initDB() {
       phone TEXT,
       location TEXT,
       nickname TEXT,
+      user_id TEXT UNIQUE,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+    // Migration: add user_id column if it doesn't exist
+    try {
+        db.exec(`ALTER TABLE users ADD COLUMN user_id TEXT`);
+    } catch (e) {
+        // Column already exists, ignore
+    }
+    // Create unique index for user_id (idempotent)
+    try {
+        db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_user_id ON users(user_id)`);
+    } catch (e) {
+        // Index may already exist
+    }
+
+    // Generate user_id for existing users who don't have one
+    const usersWithoutId: any[] = db.prepare('SELECT username FROM users WHERE user_id IS NULL').all();
+    for (const u of usersWithoutId) {
+        const newId = generateUniqueUserId();
+        db.prepare('UPDATE users SET user_id = ? WHERE username = ?').run(newId, u.username);
+    }
 
     // Community tables
     db.exec(`
@@ -32,11 +53,25 @@ export function initDB() {
       title TEXT NOT NULL,
       content TEXT NOT NULL,
       author_username TEXT NOT NULL,
+      topic TEXT NOT NULL DEFAULT '综合',
+      tags TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (author_username) REFERENCES users(username)
     )
   `);
+
+    // Add topic and tags columns if they don't exist
+    try {
+        db.exec(`ALTER TABLE posts ADD COLUMN topic TEXT NOT NULL DEFAULT '综合'`);
+    } catch (e) {
+        // Already exists
+    }
+    try {
+        db.exec(`ALTER TABLE posts ADD COLUMN tags TEXT`);
+    } catch (e) {
+        // Already exists
+    }
 
     db.exec(`
     CREATE TABLE IF NOT EXISTS comments (
@@ -86,12 +121,24 @@ export function initDB() {
   `);
 
     db.exec(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sender_username TEXT NOT NULL,
+      receiver_username TEXT NOT NULL,
+      content TEXT NOT NULL,
+      is_read INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (sender_username) REFERENCES users(username),
+      FOREIGN KEY (receiver_username) REFERENCES users(username)
+    )
+  `);
+
+    db.exec(`
     CREATE TABLE IF NOT EXISTS expert_applications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL,
       name TEXT NOT NULL,
       field TEXT NOT NULL,
-      contact TEXT NOT NULL,
       contact TEXT NOT NULL,
       reason TEXT,
       type TEXT NOT NULL DEFAULT 'individual', -- individual, enterprise, organization
@@ -99,6 +146,18 @@ export function initDB() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (username) REFERENCES users(username)
+    )
+  `);
+
+    // Industry Data
+    db.exec(`
+    CREATE TABLE IF NOT EXISTS recycling_stats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      year TEXT UNIQUE,
+      volume REAL,
+      rate REAL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
@@ -168,11 +227,26 @@ export function createUser(username: string, password: string) {
 
     const salt = 'ecocycle_salt';
     const hash = crypto.createHash('sha256').update(password + salt).digest('hex');
+    const userId = generateUniqueUserId();
 
-    const insert = db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)');
-    const info = insert.run(username, hash, 'user');
+    const insert = db.prepare('INSERT INTO users (username, password_hash, role, user_id) VALUES (?, ?, ?, ?)');
+    const info = insert.run(username, hash, 'user', userId);
 
-    return { id: info.lastInsertRowid, username, role: 'user' };
+    return { id: info.lastInsertRowid, username, role: 'user', user_id: userId };
+}
+
+// Generate a unique 6-digit user ID
+function generateUniqueUserId(): string {
+    let attempts = 0;
+    while (attempts < 100) {
+        // Generate a random 6-digit number (100000 - 999999)
+        const id = String(Math.floor(100000 + Math.random() * 900000));
+        const existing = db.prepare('SELECT 1 FROM users WHERE user_id = ?').get(id);
+        if (!existing) return id;
+        attempts++;
+    }
+    // Fallback: use timestamp-based ID
+    return String(Date.now()).slice(-8);
 }
 
 export function updateUser(username: string, updates: any) {
@@ -189,10 +263,25 @@ export function updateUser(username: string, updates: any) {
     return getUser(username);
 }
 
+export function updatePassword(username: string, newPassword: string) {
+    const user = getUser(username);
+    if (!user) {
+        throw new Error("User not found");
+    }
+
+    const salt = 'ecocycle_salt';
+    const hash = crypto.createHash('sha256').update(newPassword + salt).digest('hex');
+
+    const stmt = db.prepare('UPDATE users SET password_hash = ? WHERE username = ?');
+    stmt.run(hash, username);
+
+    return true;
+}
+
 export function getAllUsers() {
     // Return all users without sensitive info
     return db.prepare(`
-        SELECT id, username, role, avatar_url, bio, birthday, email, phone, location, nickname, verification_status, verification_type, created_at 
+        SELECT id, user_id, username, role, avatar_url, bio, birthday, email, phone, location, nickname, verification_status, verification_type, created_at 
         FROM users 
         ORDER BY created_at DESC
     `).all();
@@ -267,7 +356,12 @@ export function updateExpertApplicationStatus(id: number, status: string) {
     if (status === 'approved') {
         const app: any = db.prepare('SELECT username, type FROM expert_applications WHERE id = ?').get(id);
         if (app) {
-            const updateStmt = db.prepare('UPDATE users SET role = \'expert\', verification_type = ? WHERE username = ?');
+            const updateStmt = db.prepare(`
+                UPDATE users 
+                SET role = CASE WHEN role = 'admin' THEN 'admin' ELSE 'expert' END, 
+                    verification_type = ? 
+                WHERE username = ?
+            `);
             updateStmt.run(app.type, app.username);
         }
     }
@@ -279,10 +373,10 @@ export function updateExpertApplicationStatus(id: number, status: string) {
 // ==================== Community Helper Functions ====================
 
 // Posts (Rebuild Trigger)
-export function createPost(title: string, content: string, authorUsername: string) {
-    const stmt = db.prepare('INSERT INTO posts (title, content, author_username) VALUES (?, ?, ?)');
-    const info = stmt.run(title, content, authorUsername);
-    return { id: info.lastInsertRowid, title, content, author_username: authorUsername };
+export function createPost(title: string, content: string, authorUsername: string, topic: string = '综合', tags: string | null = null) {
+    const stmt = db.prepare('INSERT INTO posts (title, content, author_username, topic, tags) VALUES (?, ?, ?, ?, ?)');
+    const info = stmt.run(title, content, authorUsername, topic, tags);
+    return { id: info.lastInsertRowid, title, content, author_username: authorUsername, topic, tags };
 }
 
 export function deletePost(id: number) {
@@ -307,11 +401,17 @@ export function getPosts(filter?: { username?: string; likedBy?: string; followe
     `;
 
     const params: any[] = [];
+    let whereClause = "";
 
     if (filter?.likedBy) {
-        query += ` WHERE p.id IN (SELECT post_id FROM likes WHERE user_username = ?)`;
+        whereClause = ` WHERE p.id IN (SELECT post_id FROM likes WHERE user_username = ?)`;
         params.push(filter.likedBy);
+    } else if (filter?.username) {
+        whereClause = ` WHERE p.author_username = ?`;
+        params.push(filter.username);
     }
+
+    query += whereClause;
 
     query += ` ORDER BY p.created_at DESC`;
 
@@ -430,11 +530,74 @@ export function getUserStats(username: string) {
     const followersResult: any = db.prepare('SELECT COUNT(*) as count FROM user_follows WHERE following_username = ?').get(username);
     const followersCount = followersResult?.count || 0;
 
+    return { postsCount, followingCount, followersCount };
+}
+
+// Search users by username, nickname, or user_id
+export function searchUsers(query: string, currentUsername?: string, limit = 20) {
+    const searchTerm = `%${query}%`;
+    let sql = `
+        SELECT username, nickname, role, bio, avatar_url, user_id
+        FROM users
+        WHERE (username LIKE ? OR nickname LIKE ? OR user_id LIKE ?)
+    `;
+    const params: any[] = [searchTerm, searchTerm, searchTerm];
+
+    if (currentUsername) {
+        sql += ` AND username != ?`;
+        params.push(currentUsername);
+    }
+
+    sql += ` ORDER BY username ASC LIMIT ?`;
+    params.push(limit);
+
+    return db.prepare(sql).all(...params);
+}
+
+// Global Community Statistics
+export function getCommunityStats() {
+    // Total posts count
+    const postsResult: any = db.prepare('SELECT COUNT(*) as count FROM posts').get();
+    const postsCount = postsResult?.count || 0;
+
+    // Active users (mapped to total users)
+    const usersResult: any = db.prepare('SELECT COUNT(*) as count FROM users').get();
+    const activeUsersCount = usersResult?.count || 0;
+
+    // New users today
+    const newUsersResult: any = db.prepare(`
+            SELECT COUNT(*) as count 
+            FROM users 
+            WHERE date(created_at) = date('now', 'localtime')
+        `).get();
+    const newUsersTodayCount = newUsersResult?.count || 0;
+
     return {
         postsCount,
-        followingCount,
-        followersCount
+        activeUsersCount,
+        newUsersTodayCount
     };
+}
+
+// Trending Topics
+export function getTrendingTopics(limit: number = 5) {
+    const posts = db.prepare('SELECT tags FROM posts WHERE tags IS NOT NULL').all() as { tags: string }[];
+    const tagCounts: Record<string, number> = {};
+
+    posts.forEach(post => {
+        if (!post.tags) return;
+        const tags = post.tags.split(' ').filter(t => t.startsWith('#'));
+        tags.forEach(tag => {
+            tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+        });
+    });
+
+    const sortedTopics = Object.entries(tagCounts)
+        .map(([topic, count]) => ({ topic, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, limit);
+
+    return sortedTopics;
 }
 
 export function isTopicFollowedByUser(topicName: string, username: string): boolean {
@@ -482,6 +645,62 @@ export function getUserFollowing(username: string) {
         ORDER BY uf.created_at DESC
     `).all(username);
     return results;
+}
+
+// ==================== Messaging Functions ====================
+
+export function saveMessage(sender: string, receiver: string, content: string) {
+    const stmt = db.prepare('INSERT INTO messages (sender_username, receiver_username, content) VALUES (?, ?, ?)');
+    const info = stmt.run(sender, receiver, content);
+    return {
+        id: info.lastInsertRowid.toString(),
+        sender_username: sender,
+        receiver_username: receiver,
+        content,
+        created_at: new Date().toISOString()
+    };
+}
+
+export function getMessagesBetween(user1: string, user2: string, limit: number = 50) {
+    return db.prepare(`
+        SELECT * FROM messages 
+        WHERE (sender_username = ? AND receiver_username = ?) 
+           OR (sender_username = ? AND receiver_username = ?)
+        ORDER BY created_at ASC
+        LIMIT ?
+    `).all(user1, user2, user2, user1, limit);
+}
+
+export function getUnreadMessageCount(recipient: string, sender: string) {
+    const result = db.prepare(`
+        SELECT COUNT(*) as count FROM messages 
+        WHERE receiver_username = ? AND sender_username = ? AND is_read = 0
+    `).get(recipient, sender) as { count: number };
+    return result.count;
+}
+
+export function markMessagesAsRead(recipient: string, sender: string) {
+    return db.prepare(`
+        UPDATE messages SET is_read = 1 
+        WHERE receiver_username = ? AND sender_username = ? AND is_read = 0
+    `).run(recipient, sender);
+}
+
+// ==================== Industry Data Functions ====================
+
+export function getRecyclingStats() {
+    return db.prepare('SELECT year, volume, rate FROM recycling_stats ORDER BY year ASC').all();
+}
+
+export function upsertRecyclingStat(year: string, volume: number, rate: number) {
+    const stmt = db.prepare(`
+        INSERT INTO recycling_stats (year, volume, rate) 
+        VALUES (?, ?, ?) 
+        ON CONFLICT(year) DO UPDATE SET 
+        volume=excluded.volume, rate=excluded.rate, updated_at=CURRENT_TIMESTAMP
+    `);
+    const info = stmt.run(year, volume, rate);
+    return { id: info.lastInsertRowid, year, volume, rate };
 }
 
 // Run initialization

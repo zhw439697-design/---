@@ -22,6 +22,9 @@ export async function GET(request: NextRequest) {
             // TODO: Filter by followed topics
             // For now, return empty array
             posts = [];
+        } else if (filter === 'user' && username) {
+            // Get posts by a specific user
+            posts = getPosts({ username });
         } else {
             // Get all posts
             posts = getPosts();
@@ -37,17 +40,23 @@ export async function GET(request: NextRequest) {
         // Transform to frontend format
         const transformedPosts = posts.map((post: any) => {
             // Format date
-            const date = new Date(post.created_at);
-            const formattedDate = date.toLocaleDateString('zh-CN', {
+            const date = new Date(post.created_at + ' UTC');
+            const formattedDate = date.toLocaleString('zh-CN', {
+                timeZone: 'Asia/Shanghai',
                 year: 'numeric',
                 month: '2-digit',
-                day: '2-digit'
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
             }).replace(/\//g, '-');
 
             return {
                 id: post.id.toString(),
                 title: post.title,
                 content: post.content,
+                topic: post.topic,
+                tags: post.tags,
                 author: {
                     name: post.author_username,
                     role: post.author_role || 'user'
@@ -88,11 +97,11 @@ export async function POST(request: NextRequest) {
 
         const username = authToken.value;
 
-        const { title, content } = await request.json();
+        const { title, content, topic, tags } = await request.json();
 
-        if (!title || !content) {
+        if (!title || !content || !topic) {
             return NextResponse.json(
-                { error: 'Title and content are required' },
+                { error: 'Title, content, and topic are required' },
                 { status: 400 }
             );
         }
@@ -111,7 +120,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const post = createPost(title, content, username);
+        const post = createPost(title, content, username, topic, tags);
 
         return NextResponse.json({
             success: true,

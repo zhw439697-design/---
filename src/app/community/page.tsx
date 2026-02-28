@@ -5,55 +5,22 @@ import { AuroraBackground } from "@/components/AuroraBackground";
 import Link from "next/link";
 import { MessageSquare, Heart, Share2, Search, Hash, PenSquare, User, X, Loader2, RefreshCw, Mail, Send, MoreHorizontal, Phone, Video, Check } from "lucide-react";
 
-// Mock data for messages
-const MOCK_MESSAGES = [
-    {
-        id: '1',
-        sender: { name: 'Dr. Sarah', role: 'expert', abbreviation: 'S', avatar: null },
-        content: '你好，我对你发布的关于电池回收的帖子很感兴趣，能否深入交流一下？',
-        time: '2分钟前',
-        unread: 1,
-        online: true
-    },
-    {
-        id: '2',
-        sender: { name: 'EcoTech', role: 'company', abbreviation: 'E', avatar: null },
-        content: '我们公司正在寻找合作伙伴，看您的项目非常有潜力。',
-        time: '1小时前',
-        unread: 0,
-        online: false
-    },
-    {
-        id: '3',
-        sender: { name: 'GreenLife', role: 'member', abbreviation: 'G', avatar: null },
-        content: '请教一下，那个最新的环保政策在哪里可以下载详细解读？',
-        time: '昨天',
-        unread: 0,
-        online: true
-    }
-];
-
-// Mock chat history
-const MOCK_CHAT_HISTORY: Record<string, any[]> = {
-    '1': [
-        { id: '101', senderId: '1', content: '您好！我是Sarah，专注于电池材料研究。', time: '10:30', isMe: false },
-        { id: '102', senderId: 'me', content: '幸会！很高兴认识您。', time: '10:32', isMe: true },
-        { id: '103', senderId: '1', content: '我对你发布的关于电池回收的帖子很感兴趣，能否深入交流一下？', time: '10:33', isMe: false },
-    ],
-    '2': [
-        { id: '201', senderId: '2', content: '您好，我们是EcoTech发布的。', time: '09:00', isMe: false },
-        { id: '202', senderId: '2', content: '我们公司正在寻找合作伙伴，看您的项目非常有潜力。', time: '09:01', isMe: false },
-    ],
-    '3': [
-        { id: '301', senderId: 'me', content: '您好，请问有什么可以帮您的？', time: '昨天', isMe: true },
-        { id: '302', senderId: '3', content: '请教一下，那个最新的环保政策在哪里可以下载详细解读？', time: '昨天', isMe: false },
-    ]
-};
+// Contact type for messaging
+interface Contact {
+    id: string;
+    sender: { name: string; role: string; abbreviation: string; avatar: string | null };
+    content: string;
+    time: string;
+    unread: number;
+    online: boolean;
+}
 
 interface Post {
     id: string;
     title: string;
     content: string;
+    topic: string;
+    tags: string | null;
     author: {
         name: string;
         role: string;
@@ -65,11 +32,13 @@ interface Post {
 }
 
 export default function CommunityPage() {
-    const [user, setUser] = useState<{ username: string, role: string } | null>(null);
+    const [user, setUser] = useState<{ username: string, nickname?: string, user_id?: string, role: string } | null>(null);
     const [loading, setLoading] = useState(true);
     const [showPostModal, setShowPostModal] = useState(false);
     const [postTitle, setPostTitle] = useState('');
     const [postContent, setPostContent] = useState('');
+    const [postTopic, setPostTopic] = useState('综合');
+    const [postTags, setPostTags] = useState('');
     const [submitting, setSubmitting] = useState(false);
 
     // Posts and interaction states
@@ -81,7 +50,14 @@ export default function CommunityPage() {
     // Chat states
     const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
     const [chatInput, setChatInput] = useState('');
-    const [messages, setMessages] = useState<Record<string, any[]>>(MOCK_CHAT_HISTORY);
+    const [messages, setMessages] = useState<Record<string, any[]>>({});
+    const [contactList, setContactList] = useState<Contact[]>([]);
+    const [contactsLoading, setContactsLoading] = useState(false);
+
+    // User search states
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<any[]>([]);
+    const [searchLoading, setSearchLoading] = useState(false);
 
     // Comment states
     const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
@@ -91,6 +67,10 @@ export default function CommunityPage() {
 
     // User stats state
     const [userStats, setUserStats] = useState({ postsCount: 0, followersCount: 0, followingCount: 0 });
+
+    // Global Community Stats State
+    const [communityStats, setCommunityStats] = useState({ postsCount: 0, activeUsersCount: 0, newUsersTodayCount: 0 });
+    const [trendingTopics, setTrendingTopics] = useState<{ topic: string, count: number }[]>([]);
 
     // Expert Application State
     const [expertStatus, setExpertStatus] = useState<'none' | 'pending' | 'reviewing' | 'approved' | 'rejected'>('none');
@@ -132,6 +112,27 @@ export default function CommunityPage() {
             }
         } catch (err) {
             console.error('Failed to load user stats:', err);
+        }
+    };
+
+    // Fetch global community stats
+    const fetchCommunityStats = async () => {
+        try {
+            const [statsRes, trendingRes] = await Promise.all([
+                fetch('/api/community/stats'),
+                fetch('/api/community/trending')
+            ]);
+
+            if (statsRes.ok) {
+                const data = await statsRes.json();
+                setCommunityStats(data);
+            }
+            if (trendingRes.ok) {
+                const data = await trendingRes.json();
+                setTrendingTopics(data.topics || []);
+            }
+        } catch (err) {
+            console.error('Failed to load community stats:', err);
         }
     };
 
@@ -271,13 +272,176 @@ export default function CommunityPage() {
             .finally(() => setLoading(false));
     }, []);
 
+    const handleLogout = async () => {
+        try {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            setUser(null);
+            // Optional: force reload to clear all states
+            window.location.reload();
+        } catch (err) {
+            console.error('Logout failed:', err);
+        }
+    };
+
+    // Debounced user search
+    useEffect(() => {
+        if (!searchQuery.trim()) {
+            setSearchResults([]);
+            return;
+        }
+        setSearchLoading(true);
+        const timer = setTimeout(async () => {
+            try {
+                const res = await fetch(`/api/user/search?q=${encodeURIComponent(searchQuery.trim())}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setSearchResults(data.users || []);
+                }
+            } catch (err) {
+                console.error('User search failed:', err);
+            } finally {
+                setSearchLoading(false);
+            }
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
+    // Fetch contacts (followed users) for messaging
+    const fetchContacts = async (silent = false) => {
+        if (!user) return;
+        if (!silent) setContactsLoading(true);
+        try {
+            const res = await fetch('/api/user/stats');
+            if (res.ok) {
+                const data = await res.json();
+                const followingUsers = data.following || [];
+                const contacts: Contact[] = followingUsers.map((u: any) => ({
+                    id: u.username,
+                    sender: {
+                        name: u.nickname || u.username,
+                        role: u.role || 'user',
+                        abbreviation: (u.nickname || u.username)[0]?.toUpperCase() || 'U',
+                        avatar: u.avatar_url || null,
+                    },
+                    content: '',
+                    time: '',
+                    unread: u.unreadCount || 0,
+                    online: false,
+                }));
+                setContactList(contacts);
+            }
+        } catch (err) {
+            console.error('Failed to load contacts:', err);
+        } finally {
+            if (!silent) setContactsLoading(false);
+        }
+    };
+
+    // Fetch real messages for the selected chat
+    const fetchMessages = async (chatId: string) => {
+        if (!user || !chatId) return;
+        try {
+            const res = await fetch(`/api/community/messages?with=${chatId}`);
+            if (res.ok) {
+                const data = await res.json();
+                setMessages(prev => ({
+                    ...prev,
+                    [chatId]: data.messages || []
+                }));
+            }
+        } catch (err) {
+            console.error('Failed to fetch messages:', err);
+        }
+    };
+
+    // Mark messages as read
+    const markAsRead = async (chatId: string) => {
+        if (!user || !chatId) return;
+        try {
+            await fetch('/api/community/messages', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sender_username: chatId })
+            });
+            // Update local state to clear unread count
+            setContactList(prev => prev.map(c =>
+                c.id === chatId ? { ...c, unread: 0 } : c
+            ));
+        } catch (err) {
+            console.error('Failed to mark messages as read:', err);
+        }
+    };
+
+    // Polling for new messages and unread counts
+    useEffect(() => {
+        let interval: NodeJS.Timeout;
+        if (user) {
+            // Initial fetch contacts to get unread counts for sidebar
+            fetchContacts();
+
+            if (activeFilter === 'message' && selectedChatId) {
+                fetchMessages(selectedChatId);
+                markAsRead(selectedChatId);
+            }
+
+            // Set up polling every 5 seconds (silent)
+            interval = setInterval(() => {
+                fetchContacts(true); // Always refresh unread counts for global badge
+                if (activeFilter === 'message' && selectedChatId) {
+                    fetchMessages(selectedChatId);
+                    markAsRead(selectedChatId); // Auto-clear if already in chat
+                }
+            }, 5000);
+        }
+
+        return () => {
+            if (interval) clearInterval(interval);
+        };
+    }, [selectedChatId, activeFilter, user]);
+
     useEffect(() => {
         if (!loading) {
             fetchPosts();
             fetchUserStats();
             fetchExpertStatus();
+            fetchCommunityStats();
+            fetchContacts();
         }
     }, [activeFilter, loading]);
+
+    const handleSendMessage = async () => {
+        if (!chatInput.trim() || !selectedChatId || !user) return;
+
+        const content = chatInput.trim();
+        setChatInput('');
+
+        try {
+            const res = await fetch('/api/community/messages', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    receiver_username: selectedChatId,
+                    content: content
+                })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                // Optimistically add to local state
+                setMessages(prev => ({
+                    ...prev,
+                    [selectedChatId]: [...(prev[selectedChatId] || []), data.message]
+                }));
+            } else {
+                alert('发送失败，请重试');
+                setChatInput(content); // Restore input on error
+            }
+        } catch (err) {
+            console.error('Failed to send message:', err);
+            alert('发送失败，请检查网络');
+            setChatInput(content);
+        }
+    };
 
     return (
         <AuroraBackground theme="light">
@@ -295,9 +459,48 @@ export default function CommunityPage() {
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                 <input
                                     type="text"
-                                    placeholder="搜索话题、帖子..."
+                                    placeholder="搜索用户 (ID/名称)..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
                                     className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-purple-500/50 text-sm"
                                 />
+                                {searchQuery && searchResults.length > 0 && (
+                                    <div className="absolute top-full left-0 w-full mt-2 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-[60] py-2">
+                                        <div className="px-4 py-2 border-b border-slate-50">
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">搜索结果</p>
+                                        </div>
+                                        <div className="max-h-[320px] overflow-y-auto">
+                                            {searchResults.map((u) => (
+                                                <Link
+                                                    key={u.username}
+                                                    href={`/community/user/${u.username}`}
+                                                    onClick={() => setSearchQuery('')}
+                                                    className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors"
+                                                >
+                                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center text-purple-600 font-bold text-xs">
+                                                        {(u.nickname || u.username)[0].toUpperCase()}
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-medium text-slate-900 text-sm truncate">{u.nickname || u.username}</span>
+                                                            {u.role === 'expert' && <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0">专家</span>}
+                                                            {u.role === 'company' && <span className="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0">企业</span>}
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-xs text-slate-500">@{u.username}</span>
+                                                            {u.user_id && <span className="text-xs text-purple-500 font-mono">ID: {u.user_id}</span>}
+                                                        </div>
+                                                    </div>
+                                                </Link>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                                {searchQuery && searchResults.length === 0 && !searchLoading && (
+                                    <div className="absolute top-full left-0 w-full mt-2 bg-white rounded-2xl shadow-xl border border-slate-100 p-4 text-center z-[60]">
+                                        <p className="text-sm text-slate-500">未找到相关用户</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <nav className="hidden md:flex gap-6 text-sm font-medium text-slate-600">
@@ -307,14 +510,29 @@ export default function CommunityPage() {
                         </nav>
                         <div className="flex items-center gap-4">
                             {user ? (
-                                <Link href={`/community/user/${user.username}`} className="flex items-center gap-2 pl-4 border-l border-slate-200">
-                                    <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-bold">
-                                        {user.username[0].toUpperCase()}
-                                    </div>
-                                    <span className="text-sm font-medium text-slate-700 hidden md:inline">{user.username}</span>
-                                </Link>
+                                <div className="flex items-center gap-4 border-l border-slate-200 pl-4">
+                                    <Link href={`/community/user/${user.username}`} className="flex items-center gap-2 group">
+                                        <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-bold group-hover:bg-purple-200 transition-colors">
+                                            {user.username[0].toUpperCase()}
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-bold text-slate-900 leading-tight group-hover:text-purple-600 transition-colors">
+                                                {user.nickname || user.username}
+                                            </span>
+                                            {user.user_id && (
+                                                <span className="text-[10px] font-mono text-purple-500 leading-none">ID: {user.user_id}</span>
+                                            )}
+                                        </div>
+                                    </Link>
+                                    <button
+                                        onClick={handleLogout}
+                                        className="text-sm font-medium text-slate-500 hover:text-red-500 transition-colors"
+                                    >
+                                        退出
+                                    </button>
+                                </div>
                             ) : (
-                                <Link href="/auth/login" className="px-5 py-2 bg-slate-900 text-white rounded-full text-sm font-medium hover:bg-slate-800 transition-colors">
+                                <Link href="/login" className="px-5 py-2 bg-slate-900 text-white rounded-full text-sm font-medium hover:bg-slate-800 transition-colors">
                                     立即登录
                                 </Link>
                             )}
@@ -334,19 +552,19 @@ export default function CommunityPage() {
                                 <div className="space-y-4">
                                     <div className="flex justify-between items-center text-sm">
                                         <span className="text-slate-500">总帖子数</span>
-                                        <span className="font-medium text-slate-900">{userStats.postsCount + 128}</span>
+                                        <span className="font-medium text-slate-900">{communityStats.postsCount}</span>
                                     </div>
                                     <div className="flex justify-between items-center text-sm">
-                                        <span className="text-slate-500">活跃用户</span>
-                                        <span className="font-medium text-slate-900">2.4k</span>
+                                        <span className="text-slate-500">社区人数</span>
+                                        <span className="font-medium text-slate-900">{communityStats.activeUsersCount}</span>
                                     </div>
                                     <div className="flex justify-between items-center text-sm">
                                         <span className="text-slate-500">今日新增</span>
-                                        <span className="font-medium text-slate-900 text-green-600">+45</span>
+                                        <span className="font-medium text-slate-900 text-green-600">+{communityStats.newUsersTodayCount}</span>
                                     </div>
                                 </div>
                                 {!user && (
-                                    <Link href="/auth/login" className="mt-6 w-full py-2.5 bg-purple-600 text-white rounded-xl text-sm font-medium hover:bg-purple-700 transition-colors flex items-center justify-center gap-2">
+                                    <Link href="/login" className="mt-6 w-full py-2.5 bg-purple-600 text-white rounded-xl text-sm font-medium hover:bg-purple-700 transition-colors flex items-center justify-center gap-2">
                                         <User size={16} />
                                         立即登录
                                     </Link>
@@ -371,6 +589,7 @@ export default function CommunityPage() {
                                     icon={<Mail size={18} />}
                                     label="消息"
                                     onClick={() => setActiveFilter('message')}
+                                    badge={activeFilter !== 'message' ? contactList.reduce((acc, c) => acc + (c.unread || 0), 0) : 0}
                                 />
 
                             </div>
@@ -389,7 +608,7 @@ export default function CommunityPage() {
                                             {user ? <span className="font-bold text-purple-600">{user.username[0].toUpperCase()}</span> : <User size={20} />}
                                         </div>
                                         <div className="flex-grow bg-slate-50 rounded-full px-4 py-2.5 text-slate-400 text-sm">
-                                            {user ? `分享你的观点或提问，${user.username}...` : "登录后参与讨论..."}
+                                            {user ? "分享你的观点或提问" : "登录后参与讨论..."}
                                         </div>
                                         <button className="p-2 text-purple-600 hover:bg-purple-50 rounded-full">
                                             <PenSquare size={20} />
@@ -453,6 +672,17 @@ export default function CommunityPage() {
                                                         <p className="text-slate-600 text-sm leading-relaxed mb-4 line-clamp-3">
                                                             {post.content}
                                                         </p>
+
+                                                        <div className="flex flex-wrap gap-2 mb-4">
+                                                            <span className="px-2 py-0.5 bg-purple-50 text-purple-600 text-[10px] font-bold rounded-md border border-purple-100 italic">
+                                                                #{post.topic}
+                                                            </span>
+                                                            {post.tags && post.tags.split(' ').filter((t: string) => t.startsWith('#')).map((tag: string, i: number) => (
+                                                                <span key={i} className="px-2 py-0.5 bg-slate-50 text-slate-500 text-[10px] rounded-md border border-slate-100">
+                                                                    {tag}
+                                                                </span>
+                                                            ))}
+                                                        </div>
 
                                                         <div className="flex items-center gap-4 text-slate-500 text-sm">
                                                             <button
@@ -619,41 +849,90 @@ export default function CommunityPage() {
                                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                                                 <input
                                                     type="text"
-                                                    placeholder="搜索联系人..."
-                                                    className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/50 text-sm"
+                                                    placeholder="搜索用户..."
+                                                    value={searchQuery}
+                                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                                    className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/50 text-sm text-slate-900"
                                                 />
                                             </div>
+                                            {/* Search Results Dropdown */}
+                                            {searchQuery.trim() && (
+                                                <div className="mt-2 bg-white border border-slate-200 rounded-xl shadow-lg max-h-64 overflow-y-auto">
+                                                    {searchLoading ? (
+                                                        <div className="flex items-center justify-center py-4">
+                                                            <Loader2 className="animate-spin text-slate-400" size={18} />
+                                                            <span className="ml-2 text-sm text-slate-400">搜索中...</span>
+                                                        </div>
+                                                    ) : searchResults.length > 0 ? (
+                                                        searchResults.map((u: any) => (
+                                                            <Link
+                                                                key={u.username}
+                                                                href={`/community/user/${u.username}`}
+                                                                className="flex items-center gap-3 p-3 hover:bg-purple-50 transition-colors cursor-pointer border-b border-slate-50 last:border-b-0"
+                                                            >
+                                                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center text-purple-600 font-bold flex-shrink-0">
+                                                                    {(u.nickname || u.username)[0]?.toUpperCase()}
+                                                                </div>
+                                                                <div className="min-w-0">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="font-medium text-slate-900 text-sm truncate">{u.nickname || u.username}</span>
+                                                                        {u.role === 'expert' && <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0">专家</span>}
+                                                                        {u.role === 'company' && <span className="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0">企业</span>}
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-xs text-slate-500">@{u.username}</span>
+                                                                        {u.user_id && <span className="text-xs text-purple-500 font-mono">ID: {u.user_id}</span>}
+                                                                    </div>
+                                                                </div>
+                                                            </Link>
+                                                        ))
+                                                    ) : (
+                                                        <div className="text-center py-4 text-sm text-slate-400">
+                                                            未找到相关用户
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="flex-1 overflow-y-auto">
-                                            {MOCK_MESSAGES.map(msg => (
-                                                <div
-                                                    key={msg.id}
-                                                    onClick={() => setSelectedChatId(msg.id)}
-                                                    className={`p-4 flex items-center gap-3 cursor-pointer transition-colors ${selectedChatId === msg.id ? 'bg-purple-50' : 'hover:bg-white'
-                                                        }`}
-                                                >
-                                                    <div className="relative flex-shrink-0">
-                                                        <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center text-purple-600 font-bold text-lg">
-                                                            {msg.sender.abbreviation}
-                                                        </div>
-                                                        {msg.online && (
-                                                            <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full"></div>
-                                                        )}
-                                                        {msg.unread > 0 && (
-                                                            <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs flex items-center justify-center rounded-full border-2 border-white transform scale-90">
-                                                                {msg.unread}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                    <div className="flex-grow min-w-0">
-                                                        <div className="flex items-center justify-between mb-1">
-                                                            <span className={`font-medium truncate ${selectedChatId === msg.id ? 'text-purple-900' : 'text-slate-900'}`}>{msg.sender.name}</span>
-                                                            <span className="text-xs text-slate-400 flex-shrink-0">{msg.time}</span>
-                                                        </div>
-                                                        <p className="text-sm text-slate-500 truncate">{msg.content}</p>
-                                                    </div>
+                                            {contactsLoading && contactList.length === 0 ? (
+                                                <div className="flex items-center justify-center py-12">
+                                                    <Loader2 className="animate-spin text-slate-400" size={24} />
                                                 </div>
-                                            ))}
+                                            ) : contactList.length > 0 ? (
+                                                contactList.map(msg => (
+                                                    <div
+                                                        key={msg.id}
+                                                        onClick={() => setSelectedChatId(msg.id)}
+                                                        className={`p-4 flex items-center gap-3 cursor-pointer transition-colors ${selectedChatId === msg.id ? 'bg-purple-50' : 'hover:bg-white'
+                                                            }`}
+                                                    >
+                                                        <div className="relative flex-shrink-0">
+                                                            <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center text-purple-600 font-bold text-lg">
+                                                                {msg.sender.abbreviation}
+                                                            </div>
+                                                            {msg.unread > 0 && selectedChatId !== msg.id && (
+                                                                <div className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full border-2 border-white shadow-sm min-w-[20px] text-center">
+                                                                    {msg.unread > 99 ? '99+' : msg.unread}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex-grow min-w-0">
+                                                            <div className="flex items-center justify-between mb-1">
+                                                                <span className={`font-medium truncate ${selectedChatId === msg.id ? 'text-purple-900' : 'text-slate-900'}`}>{msg.sender.name}</span>
+                                                                {msg.sender.role === 'expert' && <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-medium">专家</span>}
+                                                                {msg.sender.role === 'company' && <span className="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0.5 rounded font-medium">企业</span>}
+                                                            </div>
+                                                            <p className="text-sm text-slate-500 truncate">@{msg.id}</p>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="text-center py-12 text-slate-400 text-sm">
+                                                    <p>暂无联系人</p>
+                                                    <p className="text-xs mt-1">关注其他用户后将显示在这里</p>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
 
@@ -665,20 +944,21 @@ export default function CommunityPage() {
                                                 <div className="h-16 border-b border-slate-100 bg-white/50 backdrop-blur-sm flex items-center justify-between px-6 flex-shrink-0">
                                                     <div className="flex items-center gap-3">
                                                         <div className="font-bold text-slate-900 text-lg">
-                                                            {MOCK_MESSAGES.find(m => m.id === selectedChatId)?.sender.name}
+                                                            {contactList.find(m => m.id === selectedChatId)?.sender.name || selectedChatId}
                                                         </div>
-                                                        {MOCK_MESSAGES.find(m => m.id === selectedChatId)?.sender.role === 'expert' &&
+                                                        {contactList.find(m => m.id === selectedChatId)?.sender.role === 'expert' &&
                                                             <span className="bg-emerald-100 text-emerald-700 text-xs px-2 py-0.5 rounded-full font-medium">认证专家</span>
+                                                        }
+                                                        {contactList.find(m => m.id === selectedChatId)?.sender.role === 'company' &&
+                                                            <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-medium">企业认证</span>
                                                         }
                                                     </div>
                                                     <div className="flex items-center gap-4 text-slate-400">
-                                                        <button className="hover:text-purple-600 transition-colors"><Phone size={20} /></button>
-                                                        <button className="hover:text-purple-600 transition-colors"><Video size={20} /></button>
                                                         <button className="hover:text-purple-600 transition-colors"><MoreHorizontal size={20} /></button>
                                                     </div>
                                                 </div>
 
-                                                {/* Chat Messages */}
+                                                {/* Chat Messages 聊天 */}
                                                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
                                                     {messages[selectedChatId]?.map((msg, idx) => (
                                                         <div key={msg.id} className={`flex items-start gap-3 ${msg.isMe ? 'flex-row-reverse' : ''}`}>
@@ -686,7 +966,7 @@ export default function CommunityPage() {
                                                                 ? 'bg-purple-600 text-white'
                                                                 : 'bg-white text-purple-600 border border-purple-100'
                                                                 }`}>
-                                                                {msg.isMe ? (user ? user.username[0].toUpperCase() : 'ME') : MOCK_MESSAGES.find(m => m.id === selectedChatId)?.sender.abbreviation}
+                                                                {msg.isMe ? (user ? user.username[0].toUpperCase() : 'ME') : contactList.find(m => m.id === selectedChatId)?.sender.abbreviation}
                                                             </div>
                                                             <div className={`flex flex-col ${msg.isMe ? 'items-end' : 'items-start'} max-w-[70%]`}>
                                                                 <div className={`px-4 py-3 rounded-2xl shadow-sm text-sm leading-relaxed ${msg.isMe
@@ -711,9 +991,6 @@ export default function CommunityPage() {
                                                             <button className="p-2 text-slate-400 hover:text-purple-600 rounded-lg hover:bg-slate-200/50 transition-colors">
                                                                 <Heart size={18} />
                                                             </button>
-                                                            <button className="p-2 text-slate-400 hover:text-purple-600 rounded-lg hover:bg-slate-200/50 transition-colors">
-                                                                <Share2 size={18} />
-                                                            </button>
                                                         </div>
                                                         <textarea
                                                             value={chatInput}
@@ -721,19 +998,7 @@ export default function CommunityPage() {
                                                             onKeyDown={(e) => {
                                                                 if (e.key === 'Enter' && !e.shiftKey) {
                                                                     e.preventDefault();
-                                                                    if (!chatInput.trim()) return;
-                                                                    const newMessage = {
-                                                                        id: Date.now().toString(),
-                                                                        senderId: 'me',
-                                                                        content: chatInput,
-                                                                        time: '刚刚',
-                                                                        isMe: true
-                                                                    };
-                                                                    setMessages(prev => ({
-                                                                        ...prev,
-                                                                        [selectedChatId]: [...(prev[selectedChatId] || []), newMessage]
-                                                                    }));
-                                                                    setChatInput('');
+                                                                    handleSendMessage();
                                                                 }
                                                             }}
                                                             placeholder="输入消息... (Enter发送)"
@@ -742,21 +1007,7 @@ export default function CommunityPage() {
                                                         <div className="flex justify-between items-center px-2 pb-1">
                                                             <span className="text-xs text-slate-400">Enter 发送</span>
                                                             <button
-                                                                onClick={() => {
-                                                                    if (!chatInput.trim()) return;
-                                                                    const newMessage = {
-                                                                        id: Date.now().toString(),
-                                                                        senderId: 'me',
-                                                                        content: chatInput,
-                                                                        time: '刚刚',
-                                                                        isMe: true
-                                                                    };
-                                                                    setMessages(prev => ({
-                                                                        ...prev,
-                                                                        [selectedChatId]: [...(prev[selectedChatId] || []), newMessage]
-                                                                    }));
-                                                                    setChatInput('');
-                                                                }}
+                                                                onClick={handleSendMessage}
                                                                 disabled={!chatInput.trim()}
                                                                 className="p-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                                             >
@@ -788,14 +1039,18 @@ export default function CommunityPage() {
                                     热门话题
                                 </h3>
                                 <div className="space-y-3">
-                                    {['#电池回收', '#锂电池', '#环保政策', '#新能源', '#碳中和'].map((tag, i) => (
+                                    {trendingTopics.length > 0 ? trendingTopics.map((item, i) => (
                                         <div key={i} className="flex items-center justify-between group cursor-pointer">
-                                            <span className="text-slate-600 group-hover:text-purple-600 transition-colors">{tag}</span>
+                                            <span className="text-slate-600 group-hover:text-purple-600 transition-colors">{item.topic}</span>
                                             <span className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full group-hover:bg-purple-50 group-hover:text-purple-600 transition-colors">
-                                                {120 - i * 15} 讨论
+                                                {item.count} 讨论
                                             </span>
                                         </div>
-                                    ))}
+                                    )) : (
+                                        <div className="text-sm text-slate-500 text-center py-4">
+                                            暂无热门话题
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -884,6 +1139,33 @@ export default function CommunityPage() {
                                     <p className="text-xs text-slate-500 mt-1">{postTitle.length}/100</p>
                                 </div>
 
+                                {/* Topic & Tags */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-2">选择话题 <span className="text-red-500">*</span></label>
+                                        <select
+                                            value={postTopic}
+                                            onChange={(e) => setPostTopic(e.target.value)}
+                                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                                        >
+                                            <option value="综合">综合</option>
+                                            <option value="问答">问答</option>
+                                            <option value="科普">科普</option>
+                                            <option value="建议">建议</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-2">添加标签 (选填)</label>
+                                        <input
+                                            type="text"
+                                            value={postTags}
+                                            onChange={(e) => setPostTags(e.target.value)}
+                                            placeholder="例如: #新能源汽车 #电池技术"
+                                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                                        />
+                                    </div>
+                                </div>
+
                                 {/* Content Input */}
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-2">内容</label>
@@ -906,20 +1188,23 @@ export default function CommunityPage() {
 
                                             setSubmitting(true);
                                             try {
-                                                const res = await fetch('/api/community/posts/create', {
+                                                const res = await fetch('/api/community/posts', {
                                                     method: 'POST',
                                                     headers: { 'Content-Type': 'application/json' },
-                                                    body: JSON.stringify({ title: postTitle, content: postContent })
+                                                    body: JSON.stringify({ title: postTitle, content: postContent, topic: postTopic, tags: postTags })
                                                 });
 
                                                 if (res.ok) {
                                                     setShowPostModal(false);
                                                     setPostTitle('');
                                                     setPostContent('');
+                                                    setPostTopic('综合');
+                                                    setPostTags('');
                                                     // Refresh posts
                                                     fetchPosts();
                                                     // Update stats
                                                     fetchUserStats();
+                                                    fetchCommunityStats();
                                                 } else {
                                                     alert('发布失败,请重试');
                                                 }
@@ -1038,14 +1323,21 @@ export default function CommunityPage() {
         </AuroraBackground >
     );
 }
-function NavItem({ icon, label, active = false, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void }) {
+function NavItem({ icon, label, active = false, onClick, badge }: { icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void, badge?: number }) {
     return (
         <button
             onClick={onClick}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${active ? 'bg-purple-50 text-purple-700' : 'text-slate-600 hover:bg-slate-50'
+            className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all ${active ? 'bg-purple-50 text-purple-700' : 'text-slate-600 hover:bg-slate-50'
                 }`}>
-            {icon}
-            {label}
+            <div className="flex items-center gap-3">
+                {icon}
+                {label}
+            </div>
+            {badge !== undefined && badge > 0 && (
+                <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                    {badge > 99 ? '99+' : badge}
+                </span>
+            )}
         </button>
     )
 }

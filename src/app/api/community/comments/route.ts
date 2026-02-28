@@ -19,13 +19,15 @@ export async function GET(request: NextRequest) {
 
         // Transform to frontend format
         const transformedComments = comments.map((comment: any) => {
-            const date = new Date(comment.created_at);
-            const formattedDate = date.toLocaleDateString('zh-CN', {
+            const date = new Date(comment.created_at + ' UTC');
+            const formattedDate = date.toLocaleString('zh-CN', {
+                timeZone: 'Asia/Shanghai',
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit',
                 hour: '2-digit',
-                minute: '2-digit'
+                minute: '2-digit',
+                hour12: false
             }).replace(/\//g, '-');
 
             return {

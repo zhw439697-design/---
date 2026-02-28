@@ -5,6 +5,7 @@ import { Loader2, Search, User, Shield, CheckCircle, XCircle, Trash2 } from 'luc
 
 interface UserData {
     id: number;
+    user_id: string;
     username: string;
     nickname: string;
     role: string;
@@ -72,7 +73,8 @@ export default function UsersPage() {
 
     const filteredUsers = users.filter(user =>
         user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (user.nickname && user.nickname.toLowerCase().includes(searchTerm.toLowerCase()))
+        (user.nickname && user.nickname.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (user.user_id && user.user_id.includes(searchTerm))
     );
 
     if (loading) {
@@ -139,8 +141,11 @@ export default function UsersPage() {
                                                     )}
                                                 </div>
                                                 <div>
-                                                    <div className="font-bold text-slate-900">{user.nickname || user.username}</div>
-                                                    <div className="text-xs text-slate-500">@{user.username}</div>
+                                                    <div className="font-bold text-slate-900 leading-none mb-1">{user.nickname || user.username}</div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-xs text-slate-500">@{user.username}</span>
+                                                        {user.user_id && <span className="text-[10px] font-mono text-purple-600 bg-purple-50 px-1 rounded uppercase">ID:{user.user_id}</span>}
+                                                    </div>
                                                 </div>
                                             </div>
                                         </td>

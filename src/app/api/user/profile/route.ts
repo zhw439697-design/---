@@ -1,17 +1,22 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getUser, updateUser } from "@/lib/db";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
     try {
         const cookieStore = await cookies();
         const authToken = cookieStore.get("auth_token");
 
-        if (!authToken || !authToken.value) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        // Support querying other users via ?username=xxx
+        const { searchParams } = new URL(request.url);
+        const targetUsername = searchParams.get('username');
+
+        const username = targetUsername || authToken?.value;
+
+        if (!username) {
+            return NextResponse.json({ error: "Username required" }, { status: 400 });
         }
 
-        const username = authToken.value;
         const user: any = getUser(username);
 
         if (!user) {
@@ -21,7 +26,7 @@ export async function GET() {
         // Don't send password hash to frontend
         const { password_hash, ...userProfile } = user;
 
-        return NextResponse.json({ profile: userProfile });
+        return NextResponse.json({ success: true, profile: userProfile });
     } catch (error) {
         console.error("Profile GET Error:", error);
         return NextResponse.json({ error: "Failed to fetch profile" }, { status: 500 });
